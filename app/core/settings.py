@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     log_dir: Path = PROJECT_ROOT / "logs"
     config_dir: Path = PROJECT_ROOT / "config"
     media_dir: Path = PROJECT_ROOT / "data" / "media"
+    backups_dir: Path = PROJECT_ROOT / "backups"
 
     send_delay_seconds: float = 1.0
 
@@ -31,6 +32,7 @@ class Settings(BaseSettings):
     schedule_tech_post_cron: str = "0 8 * * *"
     schedule_news_cron: str = "15 8 * * *"
     schedule_quiz_cron: str = "30 12 * * *"
+    schedule_backup_cron: str = "0 3 * * *"
 
     # Alerte email (Resend) sur échec définitif de génération — optionnel,
     # actif seulement si resend_api_key ET alert_email_to sont renseignés.
@@ -38,10 +40,16 @@ class Settings(BaseSettings):
     alert_email_from: str = "Telegram Tech Bot <onboarding@resend.dev>"
     alert_email_to: str | None = None
 
+    # Heartbeat Uptime Kuma (monitor de type Push) — optionnel, actif
+    # seulement si uptime_kuma_push_url est renseignée.
+    uptime_kuma_push_url: str | None = None
+    heartbeat_interval_seconds: int = 300
+
 
 def load_settings() -> Settings:
     settings = Settings()
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.log_dir.mkdir(parents=True, exist_ok=True)
     settings.media_dir.mkdir(parents=True, exist_ok=True)
+    settings.backups_dir.mkdir(parents=True, exist_ok=True)
     return settings
