@@ -63,8 +63,12 @@ def run() -> None:
     )
     logger.info("has_seen_news(...) = %s", repo.has_seen_news("https://example.com/smoke-test-article"))
 
-    themes = repo.recent_themes("quiz", since_days=14)
-    logger.info("recent_themes('quiz', 14j) = %s", themes)
+    titles = repo.recent_titles_by_theme("quiz", "Python", since_days=14)
+    logger.info("recent_titles_by_theme('quiz', 'Python', 14j) = %s", titles)
+    logger.info(
+        "has_quiz_theme_published_today('Python') = %s",
+        repo.has_quiz_theme_published_today("Python"),
+    )
 
     repo.record_generation_error(step="smoke_test", error_class="none", message="ceci est un test, pas une vraie erreur")
 

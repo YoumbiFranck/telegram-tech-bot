@@ -4,6 +4,8 @@ themes:
   - SQL
   - Symfony
   - JavaScript
+  - TypeScript
+  - PHP
   - Git
   - Linux
   - Docker

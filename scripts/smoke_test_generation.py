@@ -20,12 +20,9 @@ from app.core.settings import load_settings
 from app.generation.claude_client import ClaudeClient
 from app.generation.quiz_generator import generate_quiz
 from app.generation.tech_post_generator import generate_tech_post
-from app.generation.theme_rotation import pick_theme
 from app.persistence.db import connect
 from app.persistence.repository import Repository
 from app.publishing.telegram_publisher import TelegramPublisher
-
-import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +64,8 @@ async def run() -> None:
         repo.record_published_item("simple_message", post.content[:80], post, status="published")
 
     # -- quiz ---------------------------------------------------------------
-    themes_config = yaml.safe_load((settings.config_dir / "quiz_themes.yaml").read_text(encoding="utf-8"))
-    recent = repo.recent_themes("quiz", since_days=14)
-    theme = pick_theme(themes_config["themes"], recent)
-    logger.info("Thème de quiz choisi : %s (récents exclus : %s)", theme, recent)
+    theme = "Python"  # thème fixe pour ce smoke test bas-niveau ; en prod, run_quiz_step
+    # génère un quiz pour chaque thème de config/quiz_themes.yaml (voir app/jobs/daily_run.py)
 
     try:
         quiz = generate_quiz(client, prompts_dir, theme, excluded_questions=[])

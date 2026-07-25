@@ -3,12 +3,11 @@ import datetime
 import logging
 from typing import Callable, TypeVar
 
-from app.core.errors import ContentValidationError, GenerationError
+from app.core.errors import ContentValidationError, GenerationError, TelegramSendError
 from app.generation.claude_client import ClaudeCliError, ClaudeTimeoutError
 from app.generation.news_generator import generate_news_digest
 from app.generation.quiz_generator import generate_quiz
 from app.generation.tech_post_generator import generate_tech_post
-from app.generation.theme_rotation import pick_theme
 from app.jobs.context import AppContext
 from app.news.aggregator import fetch_all
 from app.news.dedup import filter_new
@@ -16,6 +15,10 @@ from app.news.dedup import filter_new
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+# Délai entre deux quiz du même batch — au-delà du simple anti-flood, ça
+# limite aussi le risque de rate limit Telegram sur une salve de ~10 envois.
+QUIZ_BATCH_DELAY_SECONDS = 8
 
 
 def _today() -> str:
@@ -136,27 +139,42 @@ async def run_news_step(ctx: AppContext) -> None:
 
 
 async def run_quiz_step(ctx: AppContext) -> None:
+    """Un quiz par thème configuré (config/quiz_themes.yaml), tous publiés à
+    la même heure planifiée. Chaque thème est idempotent individuellement
+    (has_quiz_theme_published_today) et son échec n'affecte pas les autres —
+    un thème qui échoue ne doit jamais bloquer les 9 autres."""
     today = _today()
-    if ctx.repo.has_step_run(today, "quiz"):
-        logger.info("quiz déjà publié aujourd'hui (%s), on saute.", today)
-        return
 
-    recent = ctx.repo.recent_themes("quiz", since_days=14)
-    theme = pick_theme(ctx.quiz_themes, recent)
-    excluded_questions = ctx.repo.recent_titles("quiz", since_days=30)
+    for theme in ctx.quiz_themes:
+        if ctx.repo.has_quiz_theme_published_today(theme):
+            logger.info("quiz[%s] déjà publié aujourd'hui (%s), on saute.", theme, today)
+            continue
 
-    try:
-        quiz = await _generate_with_recovery(
-            lambda: generate_quiz(ctx.client, ctx.prompts_dir, theme, excluded_questions),
-            step="quiz",
-        )
-    except GenerationError as exc:
-        logger.error("Échec définitif génération quiz: %s", exc)
-        ctx.repo.record_generation_error("quiz", exc.__class__.__name__, str(exc))
-        await _alert_admin(ctx, "quiz", str(exc))
-        return
+        excluded_questions = ctx.repo.recent_titles_by_theme("quiz", theme, since_days=30)
 
-    await ctx.publisher.publish(quiz)
-    ctx.repo.record_published_item("quiz", quiz.question, quiz, status="published", theme=theme)
+        try:
+            quiz = await _generate_with_recovery(
+                lambda theme=theme, excluded=excluded_questions: generate_quiz(
+                    ctx.client, ctx.prompts_dir, theme, excluded
+                ),
+                step=f"quiz[{theme}]",
+            )
+        except GenerationError as exc:
+            logger.error("Échec définitif génération quiz[%s]: %s", theme, exc)
+            ctx.repo.record_generation_error(f"quiz_{theme}", exc.__class__.__name__, str(exc))
+            await _alert_admin(ctx, f"quiz[{theme}]", str(exc))
+            continue
+
+        try:
+            await ctx.publisher.publish(quiz)
+        except TelegramSendError as exc:
+            logger.error("Échec définitif envoi quiz[%s]: %s", theme, exc)
+            ctx.repo.record_generation_error(f"quiz_{theme}_send", "TelegramSendError", str(exc))
+            await _alert_admin(ctx, f"quiz[{theme}] (envoi)", str(exc))
+            continue
+
+        ctx.repo.record_published_item("quiz", quiz.question, quiz, status="published", theme=theme)
+        logger.info("quiz publié (thème=%s): %s", theme, quiz.question)
+        await asyncio.sleep(QUIZ_BATCH_DELAY_SECONDS)
+
     ctx.repo.mark_step_done(today, "quiz")
-    logger.info("quiz publié (thème=%s): %s", theme, quiz.question)

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Awaitable, Callable, TypeVar
 
 from telegram import Bot, Poll
-from telegram.error import NetworkError, TimedOut
+from telegram.error import NetworkError, RetryAfter, TimedOut
 
 from app.core.errors import TelegramSendError
 from app.publishing.content_models import ContentItem, Image, ImagePoll, Quiz, SimpleMessage
@@ -62,11 +62,26 @@ class TelegramPublisher:
         await self._with_retry(lambda: self._bot.send_message(chat_id=chat_id, text=text))
 
     async def _with_retry(self, func: Callable[[], Awaitable[T]]) -> T:
-        for attempt in range(1, self._max_retries + 1):
+        rate_limit_waits = 0
+        attempt = 0
+        while True:
             try:
                 return await func()
+            except RetryAfter as exc:
+                rate_limit_waits += 1
+                if rate_limit_waits > 3:
+                    raise TelegramSendError(
+                        f"Rate limit Telegram persistant après {rate_limit_waits} attentes"
+                    ) from exc
+                logger.warning(
+                    "Rate limit Telegram, attente %.1fs avant nouvel essai", exc.retry_after
+                )
+                await asyncio.sleep(exc.retry_after + 0.5)
+                # N'entame pas le budget de tentatives réseau ci-dessous —
+                # attendre le délai demandé par Telegram n'est pas un échec.
             except (TimedOut, NetworkError) as exc:
-                if attempt == self._max_retries:
+                attempt += 1
+                if attempt >= self._max_retries:
                     logger.error("Telegram call failed after %d attempts: %s", attempt, exc)
                     raise TelegramSendError(str(exc)) from exc
                 logger.warning(
@@ -77,7 +92,6 @@ class TelegramPublisher:
                     exc,
                 )
                 await asyncio.sleep(self._retry_delay_seconds)
-        raise AssertionError("unreachable")  # pragma: no cover
 
     async def _send_simple_message(self, item: SimpleMessage) -> None:
         await self._with_retry(

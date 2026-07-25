@@ -67,14 +67,6 @@ class Repository:
         ).fetchall()
         return any(normalize_title_hash(row["title"]) == title_hash for row in rows)
 
-    def recent_themes(self, content_type: str, since_days: int = 14) -> list[str]:
-        rows = self._conn.execute(
-            "SELECT DISTINCT theme FROM published_items "
-            "WHERE content_type = ? AND theme IS NOT NULL AND published_at >= datetime('now', ?)",
-            (content_type, f"-{since_days} days"),
-        ).fetchall()
-        return [row["theme"] for row in rows]
-
     def recent_titles(self, content_type: str, since_days: int = 14) -> list[str]:
         rows = self._conn.execute(
             "SELECT title FROM published_items "
@@ -82,6 +74,25 @@ class Repository:
             (content_type, f"-{since_days} days"),
         ).fetchall()
         return [row["title"] for row in rows]
+
+    def recent_titles_by_theme(
+        self, content_type: str, theme: str, since_days: int = 30
+    ) -> list[str]:
+        rows = self._conn.execute(
+            "SELECT title FROM published_items "
+            "WHERE content_type = ? AND theme = ? AND status = 'published' "
+            "AND published_at >= datetime('now', ?)",
+            (content_type, theme, f"-{since_days} days"),
+        ).fetchall()
+        return [row["title"] for row in rows]
+
+    def has_quiz_theme_published_today(self, theme: str) -> bool:
+        row = self._conn.execute(
+            "SELECT 1 FROM published_items WHERE content_type = 'quiz' AND theme = ? "
+            "AND status = 'published' AND date(published_at) = date('now') LIMIT 1",
+            (theme,),
+        ).fetchone()
+        return row is not None
 
     # -- news_seen ------------------------------------------------------------
 
