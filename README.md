@@ -1,0 +1,163 @@
+# telegram-tech-bot
+
+Bot Telegram autonome qui publie chaque jour, sans intervention manuelle :
+
+- un post culture générale informatique (astuces, cybersécurité, dev, systèmes, DevOps, cloud, IA) ;
+- un digest des actualités IT du jour, agrégées depuis plusieurs flux RSS ;
+- une question de quiz de programmation, sur un thème qui tourne (Java, Python, SQL, Symfony, ...).
+
+Tout le contenu est généré par **Claude Code** (le CLI, en mode non interactif), via la session déjà authentifiée sur ce serveur — pas d'appel API externe facturé séparément.
+
+## Sommaire
+
+- [Architecture](#architecture)
+- [Déroulement d'une journée](#déroulement-dune-journée)
+- [Prérequis](#prérequis)
+- [Configuration (.env)](#configuration-env)
+- [Déploiement](#déploiement)
+- [Développement et tests](#développement-et-tests)
+- [Persistance (SQLite)](#persistance-sqlite)
+- [Logs et supervision](#logs-et-supervision)
+- [Sécurité](#sécurité)
+- [Structure du dépôt](#structure-du-dépôt)
+
+## Architecture
+
+```
+app/
+  core/          configuration, logging, scheduler, taxonomie d'erreurs
+  publishing/     tout ce qui parle à l'API Telegram
+  generation/     tout ce qui parle à Claude Code (client + prompts + generators)
+  news/           agrégation RSS + déduplication
+  persistence/    schéma et requêtes SQLite
+  jobs/           orchestration d'une journée (assemble tout ce qui précède)
+  main.py         point d'entrée : démarre le scheduler, tourne indéfiniment
+```
+
+Chaque package a une seule responsabilité et ne connaît que ce dont il a besoin :
+
+| Package | Rôle | Ne connaît pas |
+|---|---|---|
+| `core` | config typée (fail-fast), logs, scheduler APScheduler, exceptions | rien de métier — dépendance de tout le reste |
+| `publishing` | dispatch des 4 types de contenu (`SimpleMessage`, `Quiz`, `Image`, `ImagePoll`) vers l'API Telegram, retry réseau | Claude Code, SQLite |
+| `generation` | construit les prompts, appelle `claude -p`, valide/parse la sortie en objets `publishing.content_models` | l'API Telegram |
+| `news` | fetch + normalisation des flux RSS, filtre de déduplication | Claude Code (le choix éditorial se fait dans `generation.news_generator`) |
+| `persistence` | seule source de vérité sur "ce qui a déjà été publié" | logique métier — expose juste des requêtes |
+| `jobs` | orchestre : idempotence, retry, gestion d'erreurs, alerte admin | rien de nouveau — assemble les couches ci-dessus |
+
+Le contrat de contenu (`app/publishing/content_models.py`) est le point de passage obligé entre génération et publication : que le texte vienne d'un humain ou de Claude, il est validé (longueur, cohérence `correct_answer`/`options`, limites de l'API Telegram) **avant** tout envoi. Un quiz dont la bonne réponse ne correspond à aucune option, ou dont l'explication dépasse 200 caractères, est rejeté à la construction de l'objet, pas découvert en pleine nuit dans un log d'erreur Telegram.
+
+## Déroulement d'une journée
+
+Trois jobs indépendants, planifiés par un scheduler interne (APScheduler, cron) — pas de cron système, pas d'Airflow : le besoin réel (3 tâches/jour) ne justifie pas un orchestrateur de DAG.
+
+| Job | Horaire par défaut | Étapes |
+|---|---|---|
+| `tech_post` | 08:00 | génère un post (thèmes récents exclus), valide, publie |
+| `news_digest` | 08:15 | agrège les flux RSS, déduplique, Claude sélectionne+rédige un digest à partir des articles nouveaux, publie |
+| `quiz` | 12:30 | choisit un thème (rotation, thèmes récents exclus), génère une question, publie |
+
+Chaque job est **idempotent indépendamment** : `run_log.steps_completed` (table SQLite) garde la trace de ce qui a déjà été publié aujourd'hui. Si le conteneur redémarre en cours de journée (crash, `docker compose restart`), le job déjà exécuté est sauté au lieu d'être republié.
+
+Politique d'erreurs (`app/jobs/daily_run.py::_generate_with_recovery`) :
+
+- **timeout Claude** ou **sortie invalide** → une tentative de récupération, puis abandon du job du jour (loggé dans `generation_errors`, les deux autres jobs ne sont pas affectés) ;
+- **erreur CLI franche** (non connecté, rate-limit) → jamais retentée à l'aveugle, alerte immédiate envoyée à `TELEGRAM_ADMIN_CHAT_ID` si configuré.
+
+Un flux RSS injoignable est ignoré (loggé) sans bloquer les autres.
+
+## Prérequis
+
+- **Claude Code doit être connecté sur l'hôte** (`claude /login`, interactif, une seule fois). Sans ça, `claude -p` renvoie `Not logged in` et tous les jobs de génération échouent. Vérifier : `claude -p "ping" --output-format text` en SSH sur le serveur.
+- Docker + Docker Compose (déjà présents sur ce serveur).
+- Un bot Telegram (token via [@BotFather](https://t.me/BotFather)) ajouté comme administrateur du canal cible.
+
+## Configuration (`.env`)
+
+Copier `.env.example` vers `.env` et renseigner :
+
+| Variable | Rôle |
+|---|---|
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | obligatoires — bot et canal de publication |
+| `TELEGRAM_ADMIN_CHAT_ID` | optionnel — reçoit les alertes d'échec de génération |
+| `TZ` | fuseau utilisé par le scheduler (défaut `Europe/Paris`) |
+| `SCHEDULE_TECH_POST_CRON`, `SCHEDULE_NEWS_CRON`, `SCHEDULE_QUIZ_CRON` | horaires (cron 5 champs) |
+| `CLAUDE_BINARY_PATH`, `CLAUDE_TIMEOUT_SECONDS` | binaire `claude` et timeout par appel |
+| `APP_UID`, `APP_GID` | UID/GID de build de l'image — **doivent matcher l'utilisateur hôte** (voir Sécurité) |
+| `CLAUDE_HOST_HOME` | home hôte contenant la session Claude Code à bind-monter |
+
+`config/quiz_themes.yaml` (liste des thèmes de quiz) et `config/news_sources.yaml` (flux RSS) sont éditables sans rebuild — montés en volume, pas copiés dans l'image.
+
+## Déploiement
+
+```bash
+cd /opt/docker/telegram-tech-bot
+docker compose build
+docker compose up -d
+docker compose logs -f
+```
+
+`restart: unless-stopped` prend en charge le redémarrage automatique après reboot du serveur (via `dockerd`, lancé au démarrage par systemd).
+
+Mise à jour : `git pull` puis `docker compose build --pull && docker compose up -d`. Pas de mise à jour automatique (pas de Watchtower) — un changement de logique de génération ne doit jamais arriver sans revue.
+
+## Développement et tests
+
+Il n'y a pas de suite de tests automatisée classique : chaque brique a été validée par un **smoke test qui exerce le vrai comportement** (appel Claude réel, envoi Telegram réel sur un canal de test, vraies requêtes SQLite), pas des mocks. Ces scripts vivent dans `scripts/` et **ne sont pas inclus dans l'image de production** (`.dockerignore`).
+
+```bash
+# Valide la config sans rien envoyer
+docker compose run --rm telegram-tech-bot python -m app.main --dry-run
+
+# Exécuté depuis une image de dev (scripts montés), pas l'image de prod :
+docker run --rm -v "$(pwd)":/app -w /app --env-file .env \
+  -e HOME=/home/franck -e PATH="/home/franck/.local/bin:$PATH" \
+  -v /home/franck/.claude.json:/home/franck/.claude.json \
+  -v /home/franck/.claude:/home/franck/.claude \
+  -v /home/franck/.local/bin:/home/franck/.local/bin:ro \
+  -v /home/franck/.local/share/claude:/home/franck/.local/share/claude \
+  -v /home/franck/.local/state/claude:/home/franck/.local/state/claude \
+  -v /home/franck/.cache/claude:/home/franck/.cache/claude \
+  python:3.12-slim bash -c "pip install -q -r requirements.txt && python -m scripts.smoke_test_daily_run"
+```
+
+Scripts disponibles : `smoke_test_publisher` (couche Telegram), `smoke_test_db` (persistance/idempotence), `smoke_test_generation` (Claude → validation → publication), `smoke_test_news` (agrégation/dédup RSS), `smoke_test_daily_run` (orchestration complète), `smoke_test_scheduler` (câblage APScheduler).
+
+## Persistance (SQLite)
+
+Un seul fichier, `data/app.db`, mode WAL. Choisi plutôt que Postgres : usage mono-écrivain, quelques lignes par jour — un SGBD serveur séparé (volume, sauvegarde, identifiants dédiés) serait disproportionné.
+
+| Table | Rôle |
+|---|---|
+| `published_items` | tout contenu publié (type, thème, texte, `message_id` Telegram) — alimente la déduplication et la rotation de thèmes |
+| `news_seen` | registre des articles RSS déjà vus (par hash d'URL) |
+| `generation_errors` | journal des échecs de génération, par étape et catégorie d'erreur |
+| `run_log` | idempotence quotidienne (`steps_completed` par date) |
+
+## Logs et supervision
+
+- Logs structurés sur stdout (`docker logs` / Portainer) **et** fichier tournant `logs/app.log` (5 Mo × 5).
+- Le driver `json-file` de Docker est borné (`max-size: 10m`, `max-file: 5`) pour éviter une croissance illimitée.
+- Les logs `httpx`/`httpcore` sont volontairement passés en `WARNING` : ces libs loguent l'URL complète des appels API, qui contient le token Telegram en clair.
+
+## Sécurité
+
+- Le conteneur tourne en **non-root** (utilisateur `franck`, UID/GID alignés sur l'hôte via `APP_UID`/`APP_GID`).
+- Pas de socket Docker monté, pas de port exposé (aucune surface HTTP servie par ce projet).
+- Le conteneur a accès en lecture/écriture à la **session Claude Code personnelle de l'hôte** (`~/.claude.json`, `~/.claude/`, `~/.local/*/claude`) — c'est ce qui permet d'utiliser l'abonnement Claude Code existant plutôt qu'une clé API séparée, mais ça élargit réellement la surface de confiance : ne pas faire `claude /logout` côté hôte pendant que le conteneur tourne, et garder les dépendances Python du projet à jour.
+- Secrets uniquement dans `.env` (git-ignoré) ; `.env.example` documente les clés sans valeurs.
+
+## Structure du dépôt
+
+```
+app/                  code applicatif (voir Architecture)
+config/                prompts, thèmes de quiz, sources RSS — édité sans rebuild
+scripts/                smoke tests, absents de l'image de production
+data/                   app.db (SQLite), non versionné
+logs/                   app.log, non versionné
+backups/                sauvegardes SQLite, non versionné
+Dockerfile
+compose.yml
+requirements.txt
+.env / .env.example
+```
