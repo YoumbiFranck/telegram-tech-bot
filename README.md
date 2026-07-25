@@ -17,7 +17,8 @@ Tout le contenu est généré par **Claude Code** (le CLI, en mode non interacti
 - [Déploiement](#déploiement)
 - [Développement et tests](#développement-et-tests)
 - [Persistance (SQLite)](#persistance-sqlite)
-- [Logs et supervision](#logs-et-supervision)
+- [Sauvegardes et supervision](#sauvegardes-et-supervision)
+- [Logs](#logs)
 - [Sécurité](#sécurité)
 - [Structure du dépôt](#structure-du-dépôt)
 
@@ -62,7 +63,7 @@ Chaque job est **idempotent indépendamment** : `run_log.steps_completed` (table
 Politique d'erreurs (`app/jobs/daily_run.py::_generate_with_recovery`) :
 
 - **timeout Claude** ou **sortie invalide** → une tentative de récupération, puis abandon du job du jour (loggé dans `generation_errors`, les deux autres jobs ne sont pas affectés) ;
-- **erreur CLI franche** (non connecté, rate-limit) → jamais retentée à l'aveugle, alerte immédiate envoyée à `TELEGRAM_ADMIN_CHAT_ID` si configuré.
+- **erreur CLI franche** (non connecté, rate-limit) → jamais retentée à l'aveugle, alerte immédiate (email + Telegram admin, voir [Sauvegardes et supervision](#sauvegardes-et-supervision)).
 
 Un flux RSS injoignable est ignoré (loggé) sans bloquer les autres.
 
@@ -79,12 +80,14 @@ Copier `.env.example` vers `.env` et renseigner :
 | Variable | Rôle |
 |---|---|
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | obligatoires — bot et canal de publication |
-| `TELEGRAM_ADMIN_CHAT_ID` | optionnel — reçoit les alertes d'échec de génération |
+| `TELEGRAM_ADMIN_CHAT_ID` | optionnel — canal Telegram recevant les alertes d'échec |
 | `TZ` | fuseau utilisé par le scheduler (défaut `Europe/Paris`) |
-| `SCHEDULE_TECH_POST_CRON`, `SCHEDULE_NEWS_CRON`, `SCHEDULE_QUIZ_CRON` | horaires (cron 5 champs) |
+| `SCHEDULE_TECH_POST_CRON`, `SCHEDULE_NEWS_CRON`, `SCHEDULE_QUIZ_CRON`, `SCHEDULE_BACKUP_CRON` | horaires (cron 5 champs) |
 | `CLAUDE_BINARY_PATH`, `CLAUDE_TIMEOUT_SECONDS` | binaire `claude` et timeout par appel |
 | `APP_UID`, `APP_GID` | UID/GID de build de l'image — **doivent matcher l'utilisateur hôte** (voir Sécurité) |
 | `CLAUDE_HOST_HOME` | home hôte contenant la session Claude Code à bind-monter |
+| `RESEND_API_KEY`, `ALERT_EMAIL_FROM`, `ALERT_EMAIL_TO` | optionnel — alerte email (Resend) sur échec définitif de génération |
+| `UPTIME_KUMA_PUSH_URL`, `HEARTBEAT_INTERVAL_SECONDS` | optionnel — heartbeat vers un moniteur Uptime Kuma de type Push (défaut 300s) |
 
 `config/quiz_themes.yaml` (liste des thèmes de quiz) et `config/news_sources.yaml` (flux RSS) sont éditables sans rebuild — montés en volume, pas copiés dans l'image.
 
@@ -134,7 +137,21 @@ Un seul fichier, `data/app.db`, mode WAL. Choisi plutôt que Postgres : usage mo
 | `generation_errors` | journal des échecs de génération, par étape et catégorie d'erreur |
 | `run_log` | idempotence quotidienne (`steps_completed` par date) |
 
-## Logs et supervision
+## Sauvegardes et supervision
+
+**Sauvegardes** — `run_backup_step` (03:00 par défaut) fait un `VACUUM INTO` de `data/app.db` vers `backups/app-YYYY-MM-DD.db` (cohérent même si l'appli écrit en même temps, contrairement à une copie de fichier brute), puis purge au-delà de 14 jours. Restauration = copier le fichier voulu vers `data/app.db`, aucun outillage dump/restore nécessaire.
+
+**Alertes** — sur échec définitif d'un job (`_alert_admin` dans `daily_run.py`), les canaux configurés sont sollicités en parallèle, aucun n'est requis pour que l'autre fonctionne :
+- email via [Resend](https://resend.com) (`RESEND_API_KEY`/`ALERT_EMAIL_TO`) — indépendant de Telegram, donc utile même si le problème vient de Telegram lui-même ;
+- message Telegram vers `TELEGRAM_ADMIN_CHAT_ID`.
+
+Si aucun des deux n'est configuré, l'échec est simplement loggé (`generation_errors` + un `WARNING` explicite) — jamais silencieux, mais jamais bloquant non plus.
+
+**Heartbeat Uptime Kuma** — si `UPTIME_KUMA_PUSH_URL` est renseignée, un ping est envoyé toutes les `HEARTBEAT_INTERVAL_SECONDS` (300s par défaut) vers un moniteur Uptime Kuma de type *Push*. Ça détecte un process mort ou une boucle asyncio bloquée entre deux publications, qui peuvent être espacées de plusieurs heures.
+
+Uptime Kuma est déployé sur ce serveur sous `/opt/docker/uptime-kuma` (même convention `compose.yml` que les autres stacks), accessible sur `http://<ip-serveur>:3001`. La création du compte admin est une étape web interactive obligatoire (pas d'automatisation possible sans définir un mot de passe à la place de l'utilisateur) : visiter l'URL une fois, créer le compte, ajouter un moniteur *Push*, puis coller l'URL générée dans `UPTIME_KUMA_PUSH_URL`.
+
+## Logs
 
 - Logs structurés sur stdout (`docker logs` / Portainer) **et** fichier tournant `logs/app.log` (5 Mo × 5).
 - Le driver `json-file` de Docker est borné (`max-size: 10m`, `max-file: 5`) pour éviter une croissance illimitée.
