@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     claude_binary_path: str = "claude"
     claude_timeout_seconds: float = 90.0
 
+    # Expressions cron (min heure jour mois jour_semaine) — espacées pour ne
+    # pas tout publier d'un coup.
+    schedule_tech_post_cron: str = "0 8 * * *"
+    schedule_news_cron: str = "15 8 * * *"
+    schedule_quiz_cron: str = "30 12 * * *"
+
 
 def load_settings() -> Settings:
     settings = Settings()

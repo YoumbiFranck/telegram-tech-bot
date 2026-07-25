@@ -56,6 +56,11 @@ class TelegramPublisher:
 
         await asyncio.sleep(self._send_delay_seconds)
 
+    async def send_raw_text(self, chat_id: str, text: str) -> None:
+        """Ops/alert message (ex: notification à l'admin) — ne passe pas par
+        le contrat de contenu ContentItem, ce n'est pas du contenu publié."""
+        await self._with_retry(lambda: self._bot.send_message(chat_id=chat_id, text=text))
+
     async def _with_retry(self, func: Callable[[], Awaitable[T]]) -> T:
         for attempt in range(1, self._max_retries + 1):
             try:

@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, model_validator
 
 class SimpleMessage(BaseModel):
     type: Literal["simple_message"]
-    content: str
+    content: str = Field(min_length=1, max_length=4096)  # limite message texte Telegram
 
 
 # Limites de l'API Telegram pour les polls (stables depuis des années) :
@@ -36,7 +36,7 @@ class Quiz(BaseModel):
 
 class Image(BaseModel):
     type: Literal["image"]
-    content: str = ""
+    content: str = Field(default="", max_length=1024)  # limite caption photo Telegram
     url: str
 
 

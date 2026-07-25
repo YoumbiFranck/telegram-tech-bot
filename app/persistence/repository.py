@@ -75,6 +75,14 @@ class Repository:
         ).fetchall()
         return [row["theme"] for row in rows]
 
+    def recent_titles(self, content_type: str, since_days: int = 14) -> list[str]:
+        rows = self._conn.execute(
+            "SELECT title FROM published_items "
+            "WHERE content_type = ? AND status = 'published' AND published_at >= datetime('now', ?)",
+            (content_type, f"-{since_days} days"),
+        ).fetchall()
+        return [row["title"] for row in rows]
+
     # -- news_seen ------------------------------------------------------------
 
     def has_seen_news(self, url: str) -> bool:
@@ -123,4 +131,33 @@ class Repository:
         self._conn.execute(
             "UPDATE run_log SET status = ?, steps_completed = ?, finished_at = ? WHERE run_date = ?",
             (status, ",".join(steps_completed), _now_iso(), run_date),
+        )
+
+    # -- per-step idempotency (survit a un crash/restart en cours de journee) ----
+
+    def has_step_run(self, run_date: str, step: str) -> bool:
+        row = self._conn.execute(
+            "SELECT steps_completed FROM run_log WHERE run_date = ?", (run_date,)
+        ).fetchone()
+        if row is None:
+            return False
+        completed = [s for s in row["steps_completed"].split(",") if s]
+        return step in completed
+
+    def mark_step_done(self, run_date: str, step: str) -> None:
+        row = self._conn.execute(
+            "SELECT steps_completed FROM run_log WHERE run_date = ?", (run_date,)
+        ).fetchone()
+        if row is None:
+            self._conn.execute(
+                "INSERT INTO run_log (run_date, status, steps_completed, started_at) VALUES (?, 'in_progress', ?, ?)",
+                (run_date, step, _now_iso()),
+            )
+            return
+        completed = [s for s in row["steps_completed"].split(",") if s]
+        if step not in completed:
+            completed.append(step)
+        self._conn.execute(
+            "UPDATE run_log SET steps_completed = ? WHERE run_date = ?",
+            (",".join(completed), run_date),
         )
