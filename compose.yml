@@ -1,0 +1,35 @@
+services:
+  telegram-tech-bot:
+    container_name: telegram-tech-bot
+    build:
+      context: .
+      args:
+        APP_UID: "${APP_UID:-1000}"
+        APP_GID: "${APP_GID:-1000}"
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+      - ./backups:/app/backups
+      # Session Claude Code de l'hôte — nécessaire pour la génération IA.
+      # Montée au même chemin absolu que sur l'hôte car ~/.local/bin/claude
+      # est un symlink absolu vers ~/.local/share/claude/versions/<n>.
+      # Ne jamais faire `claude /logout` côté hôte pendant que ce conteneur
+      # tourne. Voir README.
+      - ${CLAUDE_HOST_HOME:-/home/franck}/.claude.json:/home/franck/.claude.json
+      - ${CLAUDE_HOST_HOME:-/home/franck}/.claude:/home/franck/.claude
+      - ${CLAUDE_HOST_HOME:-/home/franck}/.local/bin:/home/franck/.local/bin:ro
+      - ${CLAUDE_HOST_HOME:-/home/franck}/.local/share/claude:/home/franck/.local/share/claude
+      - ${CLAUDE_HOST_HOME:-/home/franck}/.local/state/claude:/home/franck/.local/state/claude
+      - ${CLAUDE_HOST_HOME:-/home/franck}/.cache/claude:/home/franck/.cache/claude
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
