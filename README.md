@@ -4,7 +4,7 @@ Bot Telegram autonome qui publie chaque jour, sans intervention manuelle :
 
 - un post culture générale informatique (astuces, cybersécurité, dev, systèmes, DevOps, cloud, IA) ;
 - un digest des actualités IT du jour, agrégées depuis plusieurs flux RSS ;
-- une question de quiz de programmation, sur un thème qui tourne (Java, Python, SQL, Symfony, ...).
+- un quiz de programmation **par thème configuré** (10 par défaut — Java, Python, SQL, Symfony, JavaScript, TypeScript, PHP, Git, Linux, Docker), tous publiés en rafale espacée.
 
 Tout le contenu est généré par **Claude Code** (le CLI, en mode non interactif), via la session déjà authentifiée sur ce serveur — pas d'appel API externe facturé séparément.
 
@@ -56,9 +56,11 @@ Trois jobs indépendants, planifiés par un scheduler interne (APScheduler, cron
 |---|---|---|
 | `tech_post` | 08:00 | génère un post (thèmes récents exclus), valide, publie |
 | `news_digest` | 08:15 | agrège les flux RSS, déduplique, Claude sélectionne+rédige un digest à partir des articles nouveaux, publie |
-| `quiz` | 12:30 | choisit un thème (rotation, thèmes récents exclus), génère une question, publie |
+| `quiz` | 12:30 | génère et publie **une question par thème** listé dans `config/quiz_themes.yaml` (10 par défaut), à la suite, espacées de 8s |
 
-Chaque job est **idempotent indépendamment** : `run_log.steps_completed` (table SQLite) garde la trace de ce qui a déjà été publié aujourd'hui. Si le conteneur redémarre en cours de journée (crash, `docker compose restart`), le job déjà exécuté est sauté au lieu d'être republié.
+Chaque job est **idempotent indépendamment** : `run_log.steps_completed` (table SQLite) garde la trace de ce qui a déjà été publié aujourd'hui. Si le conteneur redémarre en cours de journée (crash, `docker compose restart`), le job déjà exécuté est sauté au lieu d'être republié. Le quiz va plus loin : l'idempotence est par **(thème, jour)** (`has_quiz_theme_published_today`), pas juste par job — si le conteneur crashe après le 4ᵉ quiz sur 10, un redémarrage reprend au 5ᵉ plutôt que de tout republier ou de tout resauter. Un thème qui échoue (génération ou envoi) n'empêche jamais les autres de partir.
+
+Testé en conditions réelles : 10 quiz publiés sans erreur en 168 secondes.
 
 Politique d'erreurs (`app/jobs/daily_run.py::_generate_with_recovery`) :
 
@@ -132,7 +134,7 @@ Un seul fichier, `data/app.db`, mode WAL. Choisi plutôt que Postgres : usage mo
 
 | Table | Rôle |
 |---|---|
-| `published_items` | tout contenu publié (type, thème, texte, `message_id` Telegram) — alimente la déduplication et la rotation de thèmes |
+| `published_items` | tout contenu publié (type, thème, texte, `message_id` Telegram) — alimente la déduplication (par thème pour les quiz, globale pour le reste) |
 | `news_seen` | registre des articles RSS déjà vus (par hash d'URL) |
 | `generation_errors` | journal des échecs de génération, par étape et catégorie d'erreur |
 | `run_log` | idempotence quotidienne (`steps_completed` par date) |

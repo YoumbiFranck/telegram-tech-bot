@@ -20,7 +20,7 @@ Tout se passe dans `/opt/docker/telegram-tech-bot` sur le serveur (`ssh franck@1
 Trois endroits à consulter, du plus rapide au plus détaillé :
 
 1. **Uptime Kuma** — `http://192.168.178.37:3001`. Le moniteur `telegram-tech-bot` doit être **Up**, avec un ping toutes les 5 minutes. S'il passe **Down**, le conteneur est arrêté ou planté — voir [Problèmes courants](#problèmes-courants).
-2. **Le canal Telegram lui-même** — un post vers 08:00, un digest actus vers 08:15, un quiz vers 12:30 (heure de Paris), tous les jours.
+2. **Le canal Telegram lui-même** — un post vers 08:00, un digest actus vers 08:15, puis à partir de 12:30 une série de quiz (un par thème configuré, 10 par défaut, espacés de 8s — donc étalés sur 2-3 minutes), tous les jours.
 3. **Les logs** :
    ```bash
    cd /opt/docker/telegram-tech-bot
@@ -65,9 +65,15 @@ themes:
   - Python
   - SQL
   - Symfony
+  - JavaScript
+  - TypeScript
+  - PHP
+  - Git
+  - Linux
+  - Docker
 ```
 
-Ajoute/retire une ligne pour changer la liste. Le thème du jour est choisi en excluant ceux utilisés dans les 14 derniers jours (rotation automatique).
+**Un quiz est généré par ligne de cette liste, chaque jour à 12:30.** Ajouter un thème = un quiz de plus par jour ; en retirer un = un de moins. Pas de rotation à gérer : chaque thème listé ici est couvert tous les jours (sauf s'il a déjà été publié aujourd'hui — protection anti-doublon en cas de redémarrage).
 
 ### Sources d'actualités
 
