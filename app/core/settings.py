@@ -23,6 +23,9 @@ class Settings(BaseSettings):
 
     send_delay_seconds: float = 1.0
 
+    claude_binary_path: str = "claude"
+    claude_timeout_seconds: float = 90.0
+
 
 def load_settings() -> Settings:
     settings = Settings()
