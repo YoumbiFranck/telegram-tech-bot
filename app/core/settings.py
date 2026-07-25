@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     schedule_news_cron: str = "15 8 * * *"
     schedule_quiz_cron: str = "30 12 * * *"
 
+    # Alerte email (Resend) sur échec définitif de génération — optionnel,
+    # actif seulement si resend_api_key ET alert_email_to sont renseignés.
+    resend_api_key: str | None = None
+    alert_email_from: str = "Telegram Tech Bot <onboarding@resend.dev>"
+    alert_email_to: str | None = None
+
 
 def load_settings() -> Settings:
     settings = Settings()

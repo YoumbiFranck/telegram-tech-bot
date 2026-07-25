@@ -46,18 +46,32 @@ async def _generate_with_recovery(
 
 
 async def _alert_admin(ctx: AppContext, step: str, message: str) -> None:
-    if not ctx.settings.telegram_admin_chat_id:
+    """Fait converger tous les canaux d'alerte configurés — email et Telegram
+    admin ne sont pas mutuellement exclusifs, et l'email a l'avantage de
+    fonctionner même si le problème vient de Telegram lui-même."""
+    alerted = False
+
+    if ctx.settings.telegram_admin_chat_id:
+        try:
+            await ctx.publisher.send_raw_text(
+                chat_id=ctx.settings.telegram_admin_chat_id,
+                text=f"[telegram-tech-bot] échec {step}: {message}",
+            )
+            alerted = True
+        except Exception as exc:
+            logger.error("Échec de l'envoi de l'alerte Telegram: %s", exc)
+
+    if ctx.email_alerter is not None:
+        ctx.email_alerter.send_error_alert(step, message)
+        alerted = True
+
+    if not alerted:
         logger.warning(
-            "Pas de telegram_admin_chat_id configuré, alerte non envoyée (%s: %s)", step, message
+            "Aucun canal d'alerte configuré (TELEGRAM_ADMIN_CHAT_ID / RESEND_API_KEY), "
+            "échec %s non notifié: %s",
+            step,
+            message,
         )
-        return
-    try:
-        await ctx.publisher.send_raw_text(
-            chat_id=ctx.settings.telegram_admin_chat_id,
-            text=f"[telegram-tech-bot] échec {step}: {message}",
-        )
-    except Exception as exc:
-        logger.error("Échec de l'envoi de l'alerte admin: %s", exc)
 
 
 async def run_tech_post_step(ctx: AppContext) -> None:
