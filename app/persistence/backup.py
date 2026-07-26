@@ -12,6 +12,9 @@ def backup_database(db_path: Path, backups_dir: Path) -> Path:
     backups_dir.mkdir(parents=True, exist_ok=True)
     today = datetime.date.today().isoformat()
     backup_path = backups_dir / f"app-{today}.db"
+    # VACUUM INTO refuse d'écraser un fichier existant — pertinent si on
+    # relance la sauvegarde manuellement le même jour (--run-now backup).
+    backup_path.unlink(missing_ok=True)
 
     conn = sqlite3.connect(db_path)
     try:

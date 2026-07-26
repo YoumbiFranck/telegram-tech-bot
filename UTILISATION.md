@@ -51,6 +51,19 @@ docker compose start
 
 `restart: unless-stopped` signifie que le bot redémarre tout seul après un reboot du serveur — pas d'action nécessaire de ta part dans ce cas.
 
+### Déclencher un job manuellement (sans attendre l'heure planifiée)
+
+Utile pour tester après une modification. Le job tourne une seule fois puis le processus quitte (le scheduler du conteneur en production continue de tourner normalement à côté) :
+
+```bash
+docker compose run --rm telegram-tech-bot python -m app.main --run-now tech_post
+docker compose run --rm telegram-tech-bot python -m app.main --run-now news
+docker compose run --rm telegram-tech-bot python -m app.main --run-now quiz
+docker compose run --rm telegram-tech-bot python -m app.main --run-now backup
+```
+
+L'idempotence normale s'applique : si le job est déjà passé aujourd'hui, il est simplement sauté (log `déjà publié aujourd'hui, on saute`) — pour forcer une vraie republication de test, il faut d'abord vider l'entrée correspondante en base (voir [Statistiques rapides](#statistiques-rapides) pour des exemples de requêtes directes sur `data/app.db`).
+
 ## Personnaliser le contenu
 
 Ces fichiers sont montés en volume : **les modifier suffit, pas besoin de rebuild ni de redémarrer** (ils sont relus à chaque exécution de job).
