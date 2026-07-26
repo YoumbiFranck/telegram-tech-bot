@@ -20,7 +20,7 @@ Tout se passe dans `/opt/docker/telegram-tech-bot` sur le serveur (`ssh franck@1
 Trois endroits à consulter, du plus rapide au plus détaillé :
 
 1. **Uptime Kuma** — `http://192.168.178.37:3001`. Le moniteur `telegram-tech-bot` doit être **Up**, avec un ping toutes les 5 minutes. S'il passe **Down**, le conteneur est arrêté ou planté — voir [Problèmes courants](#problèmes-courants).
-2. **Le canal Telegram lui-même** — un post vers 08:00, un digest actus vers 08:15, puis à partir de 12:30 une série de 10 quiz sur le thème unique tiré au sort ce jour-là (3 faciles, 5 intermédiaires, 2 difficiles), espacés de 8s — donc étalés sur 2-3 minutes. Les questions avec un extrait de code sont accompagnées d'une image.
+2. **Le canal Telegram lui-même** — un post vers 08:00, un digest actus vers 08:15, puis à partir de 12:30 une série de 10 quiz sur le thème unique tiré au sort ce jour-là (6 faciles, 2 intermédiaires, 2 difficiles), espacés de 8s — donc étalés sur 2-3 minutes. Les questions avec un extrait de code sont accompagnées d'une image.
 3. **Les logs** :
    ```bash
    cd /opt/docker/telegram-tech-bot
@@ -92,7 +92,7 @@ themes:
   - Docker
 ```
 
-**Chaque jour, un seul thème de cette liste est tiré au sort** (les thèmes utilisés dans les 14 derniers jours sont évités tant qu'il en reste un non utilisé), et les 10 questions du jour portent toutes dessus. Ajouter/retirer un thème change juste le pool de tirage, pas le nombre de questions par jour (toujours 10, réparties 3 faciles / 5 intermédiaires / 2 difficiles).
+**Chaque jour, un seul thème de cette liste est tiré au sort** (les thèmes utilisés dans les 14 derniers jours sont évités tant qu'il en reste un non utilisé), et les 10 questions du jour portent toutes dessus. Ajouter/retirer un thème change juste le pool de tirage, pas le nombre de questions par jour (toujours 10, réparties 6 faciles / 2 intermédiaires / 2 difficiles).
 
 Pour savoir quel thème a été tiré aujourd'hui :
 ```bash

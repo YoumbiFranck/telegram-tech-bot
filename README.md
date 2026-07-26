@@ -4,7 +4,7 @@ Bot Telegram autonome qui publie chaque jour, sans intervention manuelle :
 
 - un post culture générale informatique (astuces, cybersécurité, dev, systèmes, DevOps, cloud, IA) ;
 - un digest des actualités IT du jour, agrégées depuis plusieurs flux RSS ;
-- 10 questions de quiz de programmation sur **un thème unique tiré au sort chaque jour** (anti-répétition sur 14 jours), réparties en 3 faciles / 5 intermédiaires / 2 difficiles, publiées en rafale espacée. Les questions qui s'appuient sur un extrait de code sont illustrées par une image générée automatiquement (repli en texte si le service d'image est indisponible).
+- 10 questions de quiz de programmation sur **un thème unique tiré au sort chaque jour** (anti-répétition sur 14 jours), réparties en 6 faciles / 2 intermédiaires / 2 difficiles, publiées en rafale espacée. Les questions qui s'appuient sur un extrait de code sont illustrées par une image générée automatiquement (repli en texte si le service d'image est indisponible).
 
 Tout le contenu est généré par **Claude Code** (le CLI, en mode non interactif), via la session déjà authentifiée sur ce serveur — pas d'appel API externe facturé séparément.
 
@@ -56,7 +56,7 @@ Trois jobs indépendants, planifiés par un scheduler interne (APScheduler, cron
 |---|---|---|
 | `tech_post` | 08:00 | génère un post (thèmes récents exclus), valide, publie |
 | `news_digest` | 08:15 | agrège les flux RSS, déduplique, Claude sélectionne+rédige un digest à partir des articles nouveaux, publie |
-| `quiz` | 12:30 | tire un thème unique au sort pour la journée (anti-répétition 14 jours), génère et publie 10 questions dessus selon un plan de difficulté fixe (3 faciles / 5 intermédiaires / 2 difficiles), à la suite, espacées de 8s |
+| `quiz` | 12:30 | tire un thème unique au sort pour la journée (anti-répétition 14 jours), génère et publie 10 questions dessus selon un plan de difficulté fixe (6 faciles / 2 intermédiaires / 2 difficiles), à la suite, espacées de 8s |
 
 Chaque job est **idempotent indépendamment** : `run_log.steps_completed` (table SQLite) garde la trace de ce qui a déjà été publié aujourd'hui. Si le conteneur redémarre en cours de journée (crash, `docker compose restart`), le job déjà exécuté est sauté au lieu d'être republié. Le quiz va plus loin : le thème du jour est figé dès le premier tirage (table `daily_quiz_theme`), et l'idempotence se fait **par position dans le plan de difficulté** (`count_quiz_published_today`) — si le conteneur crashe après la 4ᵉ question sur 10, un redémarrage reprend exactement à la 5ᵉ plutôt que de tout republier ou de tout resauter. L'échec d'une question (génération ou envoi) n'empêche jamais les suivantes de partir.
 

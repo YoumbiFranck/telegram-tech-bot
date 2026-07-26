@@ -29,7 +29,7 @@ QUIZ_BATCH_DELAY_SECONDS = 8
 # Plan de difficulté fixe et déterministe pour les 10 questions du jour —
 # l'ordre ne change jamais, ce qui permet de reprendre exactement au bon
 # index après un crash (voir count_quiz_published_today).
-DIFFICULTY_PLAN = ["easy"] * 3 + ["medium"] * 5 + ["hard"] * 2
+DIFFICULTY_PLAN = ["easy"] * 6 + ["medium"] * 2 + ["hard"] * 2
 
 
 def _today() -> str:
@@ -152,7 +152,7 @@ async def run_news_step(ctx: AppContext, force: bool = False) -> None:
 async def run_quiz_step(ctx: AppContext, force: bool = False) -> None:
     """Un thème unique est tiré au sort chaque jour (anti-répétition sur les
     14 derniers jours) et figé pour la journée entière. 10 questions sont
-    générées sur ce thème selon un plan de difficulté fixe (3 faciles / 5
+    générées sur ce thème selon un plan de difficulté fixe (6 faciles / 2
     intermédiaires / 2 difficiles). Chaque question est indépendante :
     l'échec de l'une (génération ou envoi) n'empêche jamais les suivantes,
     et la reprise après un crash se fait exactement au bon index grâce à

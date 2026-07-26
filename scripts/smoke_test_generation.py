@@ -66,7 +66,7 @@ async def run() -> None:
     # -- quiz ---------------------------------------------------------------
     theme = "Python"  # thème fixe pour ce smoke test bas-niveau ; en prod, run_quiz_step
     # tire un thème unique au sort chaque jour et genere 10 questions dessus
-    # (3 faciles/5 intermediaires/2 difficiles) - voir app/jobs/daily_run.py
+    # (6 faciles/2 intermediaires/2 difficiles) - voir app/jobs/daily_run.py
 
     try:
         quiz = generate_quiz(client, prompts_dir, theme, difficulty="medium", excluded_questions=[])
