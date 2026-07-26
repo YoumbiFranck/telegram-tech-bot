@@ -1,4 +1,5 @@
 import json
+import random
 import re
 from pathlib import Path
 from typing import Literal
@@ -66,6 +67,14 @@ def generate_quiz(
     # La difficulté est imposée par nous (via le prompt), pas déclarée par
     # Claude — on ne lui fait pas confiance pour s'auto-évaluer.
     data["difficulty"] = difficulty
+
+    # Claude a tendance à toujours écrire la bonne réponse en premier —
+    # biais connu des LLM sur ce type de génération. On mélange nous-mêmes
+    # l'ordre des options plutôt que de compter sur le prompt pour varier ;
+    # correct_answer reste une chaîne comparée par valeur, le mélange ne
+    # casse donc rien.
+    if isinstance(data.get("options"), list):
+        random.shuffle(data["options"])
 
     try:
         return Quiz(type="quiz", **data)
