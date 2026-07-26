@@ -17,6 +17,11 @@ class Quiz(BaseModel):
     options: list[str] = Field(min_length=2, max_length=10)
     correct_answer: str
     explanation: str = Field(default="", max_length=200)
+    difficulty: Literal["easy", "medium", "hard"] = "medium"
+    # Extrait de code séparé du texte de la question (voir app/generation/code_image.py) —
+    # rendu en image si possible, réintégré en texte tronqué en repli sinon.
+    code: str | None = Field(default=None, max_length=2000)
+    language: str | None = None
 
     @model_validator(mode="after")
     def check_options_length(self) -> "Quiz":

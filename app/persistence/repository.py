@@ -86,13 +86,34 @@ class Repository:
         ).fetchall()
         return [row["title"] for row in rows]
 
-    def has_quiz_theme_published_today(self, theme: str) -> bool:
+    def count_quiz_published_today(self) -> int:
         row = self._conn.execute(
-            "SELECT 1 FROM published_items WHERE content_type = 'quiz' AND theme = ? "
-            "AND status = 'published' AND date(published_at) = date('now') LIMIT 1",
-            (theme,),
+            "SELECT COUNT(*) AS n FROM published_items WHERE content_type = 'quiz' "
+            "AND status = 'published' AND date(published_at) = date('now')"
         ).fetchone()
-        return row is not None
+        return row["n"]
+
+    # -- daily_quiz_theme (thème unique tiré au sort chaque jour) --------------
+
+    def get_quiz_theme_for_today(self) -> str | None:
+        row = self._conn.execute(
+            "SELECT theme FROM daily_quiz_theme WHERE run_date = date('now')"
+        ).fetchone()
+        return row["theme"] if row else None
+
+    def set_quiz_theme_for_today(self, theme: str) -> None:
+        self._conn.execute(
+            "INSERT INTO daily_quiz_theme (run_date, theme) VALUES (date('now'), ?) "
+            "ON CONFLICT(run_date) DO NOTHING",
+            (theme,),
+        )
+
+    def recent_quiz_themes(self, since_days: int = 14) -> list[str]:
+        rows = self._conn.execute(
+            "SELECT DISTINCT theme FROM daily_quiz_theme WHERE run_date >= date('now', ?)",
+            (f"-{since_days} days",),
+        ).fetchall()
+        return [row["theme"] for row in rows]
 
     # -- news_seen ------------------------------------------------------------
 

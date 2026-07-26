@@ -42,6 +42,11 @@ CREATE TABLE IF NOT EXISTS run_log (
     started_at TEXT NOT NULL,
     finished_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS daily_quiz_theme (
+    run_date TEXT PRIMARY KEY,
+    theme TEXT NOT NULL
+);
 """
 
 

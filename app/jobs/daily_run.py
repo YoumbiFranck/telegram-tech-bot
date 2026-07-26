@@ -3,11 +3,17 @@ import datetime
 import logging
 from typing import Callable, TypeVar
 
-from app.core.errors import ContentValidationError, GenerationError, TelegramSendError
+from app.core.errors import ContentValidationError, GenerationError
 from app.generation.claude_client import ClaudeCliError, ClaudeTimeoutError
+from app.generation.code_image import (
+    format_question_with_inline_code,
+    generate_code_image,
+    resolve_language,
+)
 from app.generation.news_generator import generate_news_digest
 from app.generation.quiz_generator import generate_quiz
 from app.generation.tech_post_generator import generate_tech_post
+from app.generation.theme_rotation import pick_theme
 from app.jobs.context import AppContext
 from app.news.aggregator import fetch_all
 from app.news.dedup import filter_new
@@ -19,6 +25,11 @@ T = TypeVar("T")
 # Délai entre deux quiz du même batch — au-delà du simple anti-flood, ça
 # limite aussi le risque de rate limit Telegram sur une salve de ~10 envois.
 QUIZ_BATCH_DELAY_SECONDS = 8
+
+# Plan de difficulté fixe et déterministe pour les 10 questions du jour —
+# l'ordre ne change jamais, ce qui permet de reprendre exactement au bon
+# index après un crash (voir count_quiz_published_today).
+DIFFICULTY_PLAN = ["easy"] * 3 + ["medium"] * 5 + ["hard"] * 2
 
 
 def _today() -> str:
@@ -139,42 +150,93 @@ async def run_news_step(ctx: AppContext) -> None:
 
 
 async def run_quiz_step(ctx: AppContext) -> None:
-    """Un quiz par thème configuré (config/quiz_themes.yaml), tous publiés à
-    la même heure planifiée. Chaque thème est idempotent individuellement
-    (has_quiz_theme_published_today) et son échec n'affecte pas les autres —
-    un thème qui échoue ne doit jamais bloquer les 9 autres."""
+    """Un thème unique est tiré au sort chaque jour (anti-répétition sur les
+    14 derniers jours) et figé pour la journée entière. 10 questions sont
+    générées sur ce thème selon un plan de difficulté fixe (3 faciles / 5
+    intermédiaires / 2 difficiles). Chaque question est indépendante :
+    l'échec de l'une (génération ou envoi) n'empêche jamais les suivantes,
+    et la reprise après un crash se fait exactement au bon index grâce à
+    count_quiz_published_today. Une question qui s'appuie sur du code est
+    publiée avec une image générée par le service de rendu de code ; si ce
+    service échoue, le code est réintégré (tronqué) dans le texte."""
     today = _today()
+    if ctx.repo.has_step_run(today, "quiz"):
+        logger.info("quiz déjà publié aujourd'hui (%s), on saute.", today)
+        return
 
-    for theme in ctx.quiz_themes:
-        if ctx.repo.has_quiz_theme_published_today(theme):
-            logger.info("quiz[%s] déjà publié aujourd'hui (%s), on saute.", theme, today)
-            continue
+    theme = ctx.repo.get_quiz_theme_for_today()
+    if theme is None:
+        recent = ctx.repo.recent_quiz_themes(since_days=14)
+        theme = pick_theme(ctx.quiz_themes, recent)
+        ctx.repo.set_quiz_theme_for_today(theme)
+        logger.info("Thème du jour tiré au sort: %s (récents exclus: %s)", theme, recent)
+    else:
+        logger.info("Thème du jour (déjà tiré): %s", theme)
 
-        excluded_questions = ctx.repo.recent_titles_by_theme("quiz", theme, since_days=30)
+    already_done = ctx.repo.count_quiz_published_today()
+    if already_done >= len(DIFFICULTY_PLAN):
+        ctx.repo.mark_step_done(today, "quiz")
+        return
+
+    historical_excluded = ctx.repo.recent_titles_by_theme("quiz", theme, since_days=30)
+    generated_this_run: list[str] = []
+
+    for index in range(already_done, len(DIFFICULTY_PLAN)):
+        difficulty = DIFFICULTY_PLAN[index]
+        excluded = historical_excluded + generated_this_run
+        step_label = f"quiz[{theme}/{difficulty}/{index + 1}]"
 
         try:
             quiz = await _generate_with_recovery(
-                lambda theme=theme, excluded=excluded_questions: generate_quiz(
-                    ctx.client, ctx.prompts_dir, theme, excluded
+                lambda difficulty=difficulty, excluded=excluded: generate_quiz(
+                    ctx.client, ctx.prompts_dir, theme, difficulty, excluded
                 ),
-                step=f"quiz[{theme}]",
+                step=step_label,
             )
         except GenerationError as exc:
-            logger.error("Échec définitif génération quiz[%s]: %s", theme, exc)
-            ctx.repo.record_generation_error(f"quiz_{theme}", exc.__class__.__name__, str(exc))
-            await _alert_admin(ctx, f"quiz[{theme}]", str(exc))
+            logger.error("Échec définitif génération %s: %s", step_label, exc)
+            ctx.repo.record_generation_error(step_label, exc.__class__.__name__, str(exc))
+            await _alert_admin(ctx, step_label, str(exc))
             continue
 
+        generated_this_run.append(quiz.question)
+
+        image_bytes = None
+        if quiz.code:
+            language = resolve_language(theme, quiz.language)
+            image_bytes = generate_code_image(
+                quiz.code,
+                language,
+                ctx.settings.code_image_api_url,
+                ctx.settings.code_image_timeout_seconds,
+            )
+            if image_bytes is None:
+                ctx.repo.record_generation_error(
+                    f"{step_label}_image",
+                    "ImageFallback",
+                    "génération image échouée, repli texte utilisé",
+                )
+                quiz.question = format_question_with_inline_code(quiz.question, quiz.code)
+
         try:
-            await ctx.publisher.publish(quiz)
-        except TelegramSendError as exc:
-            logger.error("Échec définitif envoi quiz[%s]: %s", theme, exc)
-            ctx.repo.record_generation_error(f"quiz_{theme}_send", "TelegramSendError", str(exc))
-            await _alert_admin(ctx, f"quiz[{theme}] (envoi)", str(exc))
+            if image_bytes is not None:
+                await ctx.publisher.publish_quiz_with_code_image(quiz, image_bytes)
+            else:
+                await ctx.publisher.publish(quiz)
+        except Exception as exc:
+            logger.error("Échec définitif envoi %s: %s", step_label, exc)
+            ctx.repo.record_generation_error(f"{step_label}_send", exc.__class__.__name__, str(exc))
+            await _alert_admin(ctx, f"{step_label} (envoi)", str(exc))
             continue
 
         ctx.repo.record_published_item("quiz", quiz.question, quiz, status="published", theme=theme)
-        logger.info("quiz publié (thème=%s): %s", theme, quiz.question)
+        logger.info(
+            "quiz publié (%s, difficulté=%s%s): %s",
+            theme,
+            difficulty,
+            " +image" if image_bytes else "",
+            quiz.question,
+        )
         await asyncio.sleep(QUIZ_BATCH_DELAY_SECONDS)
 
     ctx.repo.mark_step_done(today, "quiz")

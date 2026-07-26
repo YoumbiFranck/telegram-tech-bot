@@ -1,6 +1,7 @@
 import json
 import re
 from pathlib import Path
+from typing import Literal
 
 from pydantic import ValidationError
 
@@ -9,6 +10,12 @@ from app.generation.claude_client import ClaudeClient
 from app.publishing.content_models import Quiz
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
+
+_DIFFICULTY_LABELS_FR = {
+    "easy": "facile",
+    "medium": "intermédiaire",
+    "hard": "difficile",
+}
 
 
 def _strip_code_fence(text: str) -> str:
@@ -27,12 +34,17 @@ def _ensure_theme_prefix(question: str, theme: str) -> str:
 
 
 def generate_quiz(
-    client: ClaudeClient, prompts_dir: Path, theme: str, excluded_questions: list[str]
+    client: ClaudeClient,
+    prompts_dir: Path,
+    theme: str,
+    difficulty: Literal["easy", "medium", "hard"],
+    excluded_questions: list[str],
 ) -> Quiz:
     template = (prompts_dir / "quiz.md").read_text(encoding="utf-8")
     prompt = (
         template.replace("{{THEME}}", theme)
         .replace("{{THEME_UPPER}}", theme.upper())
+        .replace("{{DIFFICULTY_LABEL}}", _DIFFICULTY_LABELS_FR[difficulty])
         .replace(
             "{{EXCLUDED_QUESTIONS}}",
             "; ".join(excluded_questions) if excluded_questions else "aucune",
@@ -50,6 +62,10 @@ def generate_quiz(
 
     if "question" in data:
         data["question"] = _ensure_theme_prefix(data["question"], theme)
+
+    # La difficulté est imposée par nous (via le prompt), pas déclarée par
+    # Claude — on ne lui fait pas confiance pour s'auto-évaluer.
+    data["difficulty"] = difficulty
 
     try:
         return Quiz(type="quiz", **data)

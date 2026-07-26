@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     uptime_kuma_push_url: str | None = None
     heartbeat_interval_seconds: int = 300
 
+    # Service de rendu de code en image, utilisé pour les questions de quiz
+    # qui s'appuient sur un extrait de code.
+    code_image_api_url: str = "http://192.168.178.37:3000/generate-code-image"
+    code_image_timeout_seconds: float = 15.0
+
 
 def load_settings() -> Settings:
     settings = Settings()

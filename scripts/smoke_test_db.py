@@ -65,10 +65,12 @@ def run() -> None:
 
     titles = repo.recent_titles_by_theme("quiz", "Python", since_days=14)
     logger.info("recent_titles_by_theme('quiz', 'Python', 14j) = %s", titles)
-    logger.info(
-        "has_quiz_theme_published_today('Python') = %s",
-        repo.has_quiz_theme_published_today("Python"),
-    )
+    logger.info("count_quiz_published_today() = %s", repo.count_quiz_published_today())
+
+    logger.info("get_quiz_theme_for_today() avant set = %s", repo.get_quiz_theme_for_today())
+    repo.set_quiz_theme_for_today("Python")
+    logger.info("get_quiz_theme_for_today() après set = %s", repo.get_quiz_theme_for_today())
+    logger.info("recent_quiz_themes(14j) = %s", repo.recent_quiz_themes(since_days=14))
 
     repo.record_generation_error(step="smoke_test", error_class="none", message="ceci est un test, pas une vraie erreur")
 

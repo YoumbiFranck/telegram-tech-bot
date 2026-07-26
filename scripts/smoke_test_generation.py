@@ -65,10 +65,11 @@ async def run() -> None:
 
     # -- quiz ---------------------------------------------------------------
     theme = "Python"  # thème fixe pour ce smoke test bas-niveau ; en prod, run_quiz_step
-    # génère un quiz pour chaque thème de config/quiz_themes.yaml (voir app/jobs/daily_run.py)
+    # tire un thème unique au sort chaque jour et genere 10 questions dessus
+    # (3 faciles/5 intermediaires/2 difficiles) - voir app/jobs/daily_run.py
 
     try:
-        quiz = generate_quiz(client, prompts_dir, theme, excluded_questions=[])
+        quiz = generate_quiz(client, prompts_dir, theme, difficulty="medium", excluded_questions=[])
     except (GenerationError, ContentValidationError) as exc:
         logger.error("Échec génération quiz: %s", exc)
         repo.record_generation_error("quiz", exc.__class__.__name__, str(exc))

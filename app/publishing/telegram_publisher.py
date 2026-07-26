@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from io import BytesIO
 from pathlib import Path
 from typing import Awaitable, Callable, TypeVar
 
@@ -54,6 +55,22 @@ class TelegramPublisher:
         else:  # pragma: no cover - exhaustive by ContentItem union
             raise TelegramSendError(f"Unknown content item type: {item!r}")
 
+        await asyncio.sleep(self._send_delay_seconds)
+
+    async def publish_quiz_with_code_image(self, item: Quiz, image_bytes: bytes) -> None:
+        """Quiz dont la question s'appuie sur du code déjà rendu en image —
+        envoie la photo (en mémoire, aucun fichier temporaire) en légende,
+        puis le poll lui-même via _send_quiz, réutilisée telle quelle."""
+
+        async def send_photo_op():
+            return await self._bot.send_photo(
+                chat_id=self._chat_id,
+                photo=BytesIO(image_bytes),
+                caption=item.question,
+            )
+
+        await self._with_retry(send_photo_op)
+        await self._send_quiz(item)
         await asyncio.sleep(self._send_delay_seconds)
 
     async def send_raw_text(self, chat_id: str, text: str) -> None:
