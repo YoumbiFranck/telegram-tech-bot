@@ -20,7 +20,9 @@ from app.publishing.telegram_publisher import TelegramPublisher
 logger = logging.getLogger(__name__)
 
 
-async def _run_backup_step_async(ctx: AppContext) -> None:
+async def _run_backup_step_async(ctx: AppContext, force: bool = False) -> None:
+    # La sauvegarde n'a pas de notion d'idempotence à contourner — force est
+    # accepté seulement pour garder une signature uniforme entre les jobs.
     run_backup_step(ctx)
 
 
@@ -72,12 +74,14 @@ async def run_forever(settings: Settings) -> None:
     conn.close()
 
 
-async def run_once(settings: Settings, job_name: str) -> None:
+async def run_once(settings: Settings, job_name: str, force: bool = False) -> None:
     """Exécute un seul job immédiatement puis quitte — pour tester sans
-    attendre l'heure planifiée. Ne démarre pas le scheduler."""
+    attendre l'heure planifiée. Ne démarre pas le scheduler. force=True
+    ignore l'idempotence du jour (sinon un job déjà passé aujourd'hui est
+    simplement sauté, comme en fonctionnement normal)."""
     conn, ctx = build_app_context(settings)
-    logger.info("Exécution manuelle du job %r...", job_name)
-    await RUN_NOW_JOBS[job_name](ctx)
+    logger.info("Exécution manuelle du job %r (force=%s)...", job_name, force)
+    await RUN_NOW_JOBS[job_name](ctx, force=force)
     logger.info("Job %r terminé.", job_name)
     conn.close()
 
@@ -94,6 +98,11 @@ def main() -> None:
         choices=sorted(RUN_NOW_JOBS),
         help="exécute ce job immédiatement (test), puis quitte sans démarrer le scheduler",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="avec --run-now, ignore l'idempotence du jour (republie même si déjà fait aujourd'hui)",
+    )
     args = parser.parse_args()
 
     settings = load_settings()
@@ -106,7 +115,7 @@ def main() -> None:
         return
 
     if args.run_now:
-        asyncio.run(run_once(settings, args.run_now))
+        asyncio.run(run_once(settings, args.run_now, force=args.force))
         return
 
     asyncio.run(run_forever(settings))

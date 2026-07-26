@@ -88,9 +88,9 @@ async def _alert_admin(ctx: AppContext, step: str, message: str) -> None:
         )
 
 
-async def run_tech_post_step(ctx: AppContext) -> None:
+async def run_tech_post_step(ctx: AppContext, force: bool = False) -> None:
     today = _today()
-    if ctx.repo.has_step_run(today, "tech_post"):
+    if not force and ctx.repo.has_step_run(today, "tech_post"):
         logger.info("tech_post déjà publié aujourd'hui (%s), on saute.", today)
         return
 
@@ -113,9 +113,9 @@ async def run_tech_post_step(ctx: AppContext) -> None:
     logger.info("tech_post publié: %s", post.content[:80])
 
 
-async def run_news_step(ctx: AppContext) -> None:
+async def run_news_step(ctx: AppContext, force: bool = False) -> None:
     today = _today()
-    if ctx.repo.has_step_run(today, "news_digest"):
+    if not force and ctx.repo.has_step_run(today, "news_digest"):
         logger.info("news_digest déjà publié aujourd'hui (%s), on saute.", today)
         return
 
@@ -149,7 +149,7 @@ async def run_news_step(ctx: AppContext) -> None:
     logger.info("news_digest publié (%d articles source).", len(candidates))
 
 
-async def run_quiz_step(ctx: AppContext) -> None:
+async def run_quiz_step(ctx: AppContext, force: bool = False) -> None:
     """Un thème unique est tiré au sort chaque jour (anti-répétition sur les
     14 derniers jours) et figé pour la journée entière. 10 questions sont
     générées sur ce thème selon un plan de difficulté fixe (3 faciles / 5
@@ -158,9 +158,14 @@ async def run_quiz_step(ctx: AppContext) -> None:
     et la reprise après un crash se fait exactement au bon index grâce à
     count_quiz_published_today. Une question qui s'appuie sur du code est
     publiée avec une image générée par le service de rendu de code ; si ce
-    service échoue, le code est réintégré (tronqué) dans le texte."""
+    service échoue, le code est réintégré (tronqué) dans le texte.
+
+    force=True (--run-now --force) ignore l'idempotence du jour et republie
+    un batch complet de 10 questions, sur le thème déjà tiré aujourd'hui
+    s'il y en a un (sinon un nouveau est tiré) — utile pour tester sans
+    attendre le lendemain."""
     today = _today()
-    if ctx.repo.has_step_run(today, "quiz"):
+    if not force and ctx.repo.has_step_run(today, "quiz"):
         logger.info("quiz déjà publié aujourd'hui (%s), on saute.", today)
         return
 
@@ -173,8 +178,8 @@ async def run_quiz_step(ctx: AppContext) -> None:
     else:
         logger.info("Thème du jour (déjà tiré): %s", theme)
 
-    already_done = ctx.repo.count_quiz_published_today()
-    if already_done >= len(DIFFICULTY_PLAN):
+    already_done = 0 if force else ctx.repo.count_quiz_published_today()
+    if not force and already_done >= len(DIFFICULTY_PLAN):
         ctx.repo.mark_step_done(today, "quiz")
         return
 
