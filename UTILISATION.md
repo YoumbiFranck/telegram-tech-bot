@@ -20,7 +20,7 @@ Tout se passe dans `/opt/docker/telegram-tech-bot` sur le serveur (`ssh franck@1
 Trois endroits à consulter, du plus rapide au plus détaillé :
 
 1. **Uptime Kuma** — `http://192.168.178.37:3001`. Le moniteur `telegram-tech-bot` doit être **Up**, avec un ping toutes les 5 minutes. S'il passe **Down**, le conteneur est arrêté ou planté — voir [Problèmes courants](#problèmes-courants).
-2. **Le canal Telegram lui-même** — un post vers 08:00, un digest actus vers 08:15, puis à partir de 12:30 une série de quiz (un par thème configuré, 10 par défaut, espacés de 8s — donc étalés sur 2-3 minutes), tous les jours.
+2. **Le canal Telegram lui-même** — un post vers 08:00, un digest actus vers 08:15, puis à partir de 12:30 une série de 10 quiz sur le thème unique tiré au sort ce jour-là (3 faciles, 5 intermédiaires, 2 difficiles), espacés de 8s — donc étalés sur 2-3 minutes. Les questions avec un extrait de code sont accompagnées d'une image.
 3. **Les logs** :
    ```bash
    cd /opt/docker/telegram-tech-bot
@@ -73,7 +73,18 @@ themes:
   - Docker
 ```
 
-**Un quiz est généré par ligne de cette liste, chaque jour à 12:30.** Ajouter un thème = un quiz de plus par jour ; en retirer un = un de moins. Pas de rotation à gérer : chaque thème listé ici est couvert tous les jours (sauf s'il a déjà été publié aujourd'hui — protection anti-doublon en cas de redémarrage).
+**Chaque jour, un seul thème de cette liste est tiré au sort** (les thèmes utilisés dans les 14 derniers jours sont évités tant qu'il en reste un non utilisé), et les 10 questions du jour portent toutes dessus. Ajouter/retirer un thème change juste le pool de tirage, pas le nombre de questions par jour (toujours 10, réparties 3 faciles / 5 intermédiaires / 2 difficiles).
+
+Pour savoir quel thème a été tiré aujourd'hui :
+```bash
+docker compose run --rm telegram-tech-bot python -c "
+from app.core.settings import load_settings
+from app.persistence.db import connect
+from app.persistence.repository import Repository
+s = load_settings()
+print(Repository(connect(s.data_dir / 'app.db')).get_quiz_theme_for_today())
+"
+```
 
 ### Sources d'actualités
 
@@ -176,6 +187,14 @@ print(repo.has_step_run(datetime.date.today().isoformat(), 'tech_post'))
 
 **Un quiz ou un post généré est de mauvaise qualité**
 Ajuster le prompt correspondant dans `app/generation/prompts/`, puis rebuild (voir [Personnaliser le contenu](#personnaliser-le-contenu)).
+
+**Les questions de quiz avec code n'affichent jamais d'image (toujours en texte)**
+Le service de rendu (`CODE_IMAGE_API_URL` dans `.env`) est probablement indisponible — ce n'est pas bloquant (repli automatique en texte tronqué), mais à vérifier :
+```bash
+curl -s -o /dev/null -w "HTTP %{http_code}\n" -X POST "$CODE_IMAGE_API_URL" \
+  -H "Content-Type: application/json" -d '{"code":"const x = 1;","language":"javascript"}'
+```
+`HTTP 200` attendu. Voir aussi `generation_errors` (catégorie `ImageFallback`) pour la fréquence des échecs.
 
 **Le bot n'a plus posté depuis plusieurs jours**
 ```bash

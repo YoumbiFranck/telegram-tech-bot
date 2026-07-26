@@ -4,7 +4,7 @@ Bot Telegram autonome qui publie chaque jour, sans intervention manuelle :
 
 - un post culture générale informatique (astuces, cybersécurité, dev, systèmes, DevOps, cloud, IA) ;
 - un digest des actualités IT du jour, agrégées depuis plusieurs flux RSS ;
-- un quiz de programmation **par thème configuré** (10 par défaut — Java, Python, SQL, Symfony, JavaScript, TypeScript, PHP, Git, Linux, Docker), tous publiés en rafale espacée.
+- 10 questions de quiz de programmation sur **un thème unique tiré au sort chaque jour** (anti-répétition sur 14 jours), réparties en 3 faciles / 5 intermédiaires / 2 difficiles, publiées en rafale espacée. Les questions qui s'appuient sur un extrait de code sont illustrées par une image générée automatiquement (repli en texte si le service d'image est indisponible).
 
 Tout le contenu est généré par **Claude Code** (le CLI, en mode non interactif), via la session déjà authentifiée sur ce serveur — pas d'appel API externe facturé séparément.
 
@@ -56,11 +56,13 @@ Trois jobs indépendants, planifiés par un scheduler interne (APScheduler, cron
 |---|---|---|
 | `tech_post` | 08:00 | génère un post (thèmes récents exclus), valide, publie |
 | `news_digest` | 08:15 | agrège les flux RSS, déduplique, Claude sélectionne+rédige un digest à partir des articles nouveaux, publie |
-| `quiz` | 12:30 | génère et publie **une question par thème** listé dans `config/quiz_themes.yaml` (10 par défaut), à la suite, espacées de 8s |
+| `quiz` | 12:30 | tire un thème unique au sort pour la journée (anti-répétition 14 jours), génère et publie 10 questions dessus selon un plan de difficulté fixe (3 faciles / 5 intermédiaires / 2 difficiles), à la suite, espacées de 8s |
 
-Chaque job est **idempotent indépendamment** : `run_log.steps_completed` (table SQLite) garde la trace de ce qui a déjà été publié aujourd'hui. Si le conteneur redémarre en cours de journée (crash, `docker compose restart`), le job déjà exécuté est sauté au lieu d'être republié. Le quiz va plus loin : l'idempotence est par **(thème, jour)** (`has_quiz_theme_published_today`), pas juste par job — si le conteneur crashe après le 4ᵉ quiz sur 10, un redémarrage reprend au 5ᵉ plutôt que de tout republier ou de tout resauter. Un thème qui échoue (génération ou envoi) n'empêche jamais les autres de partir.
+Chaque job est **idempotent indépendamment** : `run_log.steps_completed` (table SQLite) garde la trace de ce qui a déjà été publié aujourd'hui. Si le conteneur redémarre en cours de journée (crash, `docker compose restart`), le job déjà exécuté est sauté au lieu d'être republié. Le quiz va plus loin : le thème du jour est figé dès le premier tirage (table `daily_quiz_theme`), et l'idempotence se fait **par position dans le plan de difficulté** (`count_quiz_published_today`) — si le conteneur crashe après la 4ᵉ question sur 10, un redémarrage reprend exactement à la 5ᵉ plutôt que de tout republier ou de tout resauter. L'échec d'une question (génération ou envoi) n'empêche jamais les suivantes de partir.
 
-Testé en conditions réelles : 10 quiz publiés sans erreur en 168 secondes.
+**Questions avec code** — si une question s'appuie sur un extrait de code, Claude le fournit séparément (`code`/`language`, jamais dans le texte de la question). Le code est envoyé à un service de rendu externe (`CODE_IMAGE_API_URL`) qui renvoie une image, publiée en photo juste avant le poll. Si ce service échoue (indisponible, timeout), le code est réintégré dans le texte de la question, tronqué pour respecter la limite de 300 caractères de l'API Telegram — le quiz est toujours publié, jamais perdu.
+
+Testé en conditions réelles : 10/10 questions publiées sur un thème unique, répartition de difficulté exacte confirmée, questions à code illustrées par une image générée avec succès.
 
 Politique d'erreurs (`app/jobs/daily_run.py::_generate_with_recovery`) :
 
@@ -90,6 +92,7 @@ Copier `.env.example` vers `.env` et renseigner :
 | `CLAUDE_HOST_HOME` | home hôte contenant la session Claude Code à bind-monter |
 | `RESEND_API_KEY`, `ALERT_EMAIL_FROM`, `ALERT_EMAIL_TO` | optionnel — alerte email (Resend) sur échec définitif de génération |
 | `UPTIME_KUMA_PUSH_URL`, `HEARTBEAT_INTERVAL_SECONDS` | optionnel — heartbeat vers un moniteur Uptime Kuma de type Push (défaut 300s) |
+| `CODE_IMAGE_API_URL`, `CODE_IMAGE_TIMEOUT_SECONDS` | service de rendu de code en image pour les questions de quiz avec code |
 
 `config/quiz_themes.yaml` (liste des thèmes de quiz) et `config/news_sources.yaml` (flux RSS) sont éditables sans rebuild — montés en volume, pas copiés dans l'image.
 
@@ -138,6 +141,7 @@ Un seul fichier, `data/app.db`, mode WAL. Choisi plutôt que Postgres : usage mo
 | `news_seen` | registre des articles RSS déjà vus (par hash d'URL) |
 | `generation_errors` | journal des échecs de génération, par étape et catégorie d'erreur |
 | `run_log` | idempotence quotidienne (`steps_completed` par date) |
+| `daily_quiz_theme` | thème de quiz tiré au sort pour chaque jour, figé dès le premier tirage |
 
 ## Sauvegardes et supervision
 
