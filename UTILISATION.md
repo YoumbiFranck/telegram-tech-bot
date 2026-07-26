@@ -62,7 +62,13 @@ docker compose run --rm telegram-tech-bot python -m app.main --run-now quiz
 docker compose run --rm telegram-tech-bot python -m app.main --run-now backup
 ```
 
-L'idempotence normale s'applique : si le job est déjà passé aujourd'hui, il est simplement sauté (log `déjà publié aujourd'hui, on saute`) — pour forcer une vraie republication de test, il faut d'abord vider l'entrée correspondante en base (voir [Statistiques rapides](#statistiques-rapides) pour des exemples de requêtes directes sur `data/app.db`).
+Par défaut, l'idempotence normale s'applique : si le job est déjà passé aujourd'hui, il est simplement sauté (log `déjà publié aujourd'hui, on saute`). Pour forcer une vraie republication de test malgré tout, ajoute `--force` :
+
+```bash
+docker compose run --rm telegram-tech-bot python -m app.main --run-now quiz --force
+```
+
+`--force` republie réellement (nouveaux appels Claude, vrais messages sur le canal) — pour `quiz`, ça régénère un batch complet de 10 questions sur le thème déjà tiré aujourd'hui (pas de nouveau tirage de thème), en plus de celles déjà publiées ce jour-là.
 
 ## Personnaliser le contenu
 
