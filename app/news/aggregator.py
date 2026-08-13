@@ -1,4 +1,5 @@
 import logging
+import socket
 from dataclasses import dataclass
 
 import feedparser
@@ -6,6 +7,11 @@ import feedparser
 from app.news.sources import NewsSource
 
 logger = logging.getLogger(__name__)
+
+# feedparser n'expose aucun paramètre de timeout et bloque indéfiniment sur
+# un flux qui accepte la connexion sans jamais répondre — ce qui a déjà gelé
+# tout le scheduler (event loop asyncio partagé) pendant deux semaines.
+FETCH_TIMEOUT_SECONDS = 15
 
 
 @dataclass
@@ -18,7 +24,12 @@ class NewsEntry:
 
 
 def fetch_source(source: NewsSource, max_entries: int = 15) -> list[NewsEntry]:
-    parsed = feedparser.parse(source.url)
+    previous_timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(FETCH_TIMEOUT_SECONDS)
+    try:
+        parsed = feedparser.parse(source.url)
+    finally:
+        socket.setdefaulttimeout(previous_timeout)
     if parsed.bozo:
         logger.warning(
             "Flux mal formé ou inaccessible, ignoré: %s (%s)", source.name, parsed.get("bozo_exception")

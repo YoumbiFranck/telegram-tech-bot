@@ -119,7 +119,10 @@ async def run_news_step(ctx: AppContext, force: bool = False) -> None:
         logger.info("news_digest déjà publié aujourd'hui (%s), on saute.", today)
         return
 
-    entries = fetch_all(ctx.news_sources)
+    # fetch_all fait des appels réseau bloquants (feedparser) — exécuté hors
+    # de l'event loop pour qu'un flux lent ne puisse plus jamais geler tout
+    # le scheduler, même si le timeout de fetch_source échoue à s'appliquer.
+    entries = await asyncio.to_thread(fetch_all, ctx.news_sources)
     new_entries = filter_new(entries, ctx.repo)
     logger.info("Actus: %d récupérées, %d nouvelles.", len(entries), len(new_entries))
 
